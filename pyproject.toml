@@ -1,0 +1,19 @@
+[project]
+name = "visdrone-flow"
+version = "0.1.0"
+description = "Low-altitude UAV grid traffic forecasting algorithm service."
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+  "pandas",
+  "pydantic",
+  "scikit-learn",
+]
+
+[project.scripts]
+visdrone-flow = "visdrone_flow.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
