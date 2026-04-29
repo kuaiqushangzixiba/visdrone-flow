@@ -94,3 +94,92 @@ class PredictionResponse(BaseModel):
     time_granularity_minutes: int
     predictions: list[PredictionPoint]
 
+
+class GridCell(BaseModel):
+    """Standard low-altitude grid cell used by all non-frontend algorithm modules."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    grid_id: str
+    height_layer: int = Field(..., ge=0)
+    center_x_m: float
+    center_y_m: float
+    center_z_m: float = Field(..., ge=0)
+    time_slot: datetime | None = None
+    route_capacity: float = Field(1, ge=0)
+    occupancy: float = Field(0, ge=0)
+    congestion_score: float = Field(0, ge=0)
+    em_interference: float = Field(0, ge=0)
+    weather_wind: float = Field(0, ge=0)
+    weather_visibility: float = Field(10_000, ge=0)
+    population_density: float = Field(0, ge=0)
+    no_fly_flag: int = Field(0, ge=0, le=1)
+    risk_score: float = Field(0, ge=0)
+    height_ref: HeightReference = "AGL"
+
+
+class Transmitter(BaseModel):
+    """Communication transmitter or jammer candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    transmitter_id: str
+    x_m: float
+    y_m: float
+    z_m: float = Field(..., ge=0)
+    frequency_mhz: float = Field(..., gt=0)
+    bandwidth_mhz: float = Field(10, gt=0)
+    tx_power_dbm: float = 30
+    tx_gain_dbi: float = 0
+    rx_gain_dbi: float = 0
+    noise_figure_db: float = Field(7, ge=0)
+    role: Literal["base_station", "relay", "uav", "jammer"] = "base_station"
+
+
+class UavState(BaseModel):
+    """Current UAV state for allocation, routing, and safety modules."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    uav_id: str
+    grid_id: str
+    height_layer: int = Field(..., ge=0)
+    x_m: float
+    y_m: float
+    z_m: float = Field(..., ge=0)
+    vx_mps: float = 0
+    vy_mps: float = 0
+    vz_mps: float = 0
+    speed_mps: float = Field(12, gt=0)
+    battery_pct: float = Field(100, ge=0, le=100)
+    max_range_m: float = Field(20_000, gt=0)
+    payload_capacity_kg: float = Field(0, ge=0)
+    current_payload_kg: float = Field(0, ge=0)
+    priority: int = Field(1, ge=0)
+
+
+class MissionTask(BaseModel):
+    """Task demand that must be assigned to a UAV and airspace route."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str
+    origin_grid_id: str
+    origin_height_layer: int = Field(..., ge=0)
+    dest_grid_id: str
+    dest_height_layer: int = Field(..., ge=0)
+    priority: int = Field(1, ge=0)
+    required_payload_kg: float = Field(0, ge=0)
+    earliest_time: datetime | None = None
+    latest_time: datetime | None = None
+
+
+class RoutePlanRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_grid_id: str
+    start_height_layer: int = Field(..., ge=0)
+    end_grid_id: str
+    end_height_layer: int = Field(..., ge=0)
+    max_nodes: int = Field(10_000, ge=1)
+

@@ -4,14 +4,21 @@ import argparse
 import json
 from pathlib import Path
 
+import pandas as pd
+
+from .allocation import ResourceAllocationModel
 from .api import run_server
+from .electromagnetic import ElectromagneticEnvironmentModel
 from .features import FeatureConfig
 from .io import read_edges_csv, read_records_csv, write_json
 from .model_store import ModelBundle, load_bundle, save_bundle, utc_now_iso
 from .models import HistoricalAverageModel, SpatialTemporalRidgeModel
-from .sample_data import generate_sample
+from .routing import AStarRoutePlanner, route_to_dataframe
+from .safety import SafetyAssessmentModel
+from .sample_data import generate_operational_sample, generate_sample
 from .schemas import PredictionRequest
 from .service import FlowForecastService
+from .state_io import read_cells_csv, read_tasks_csv, read_transmitters_csv, read_uavs_csv
 
 
 def main() -> None:
@@ -21,6 +28,13 @@ def main() -> None:
     sample = subparsers.add_parser("generate-sample")
     sample.add_argument("--records", default="examples/sample_flow.csv")
     sample.add_argument("--edges", default="examples/sample_edges.csv")
+
+    operational = subparsers.add_parser("generate-operational-sample")
+    operational.add_argument("--cells", default="examples/sample_cells.csv")
+    operational.add_argument("--edges", default="examples/sample_operational_edges.csv")
+    operational.add_argument("--transmitters", default="examples/sample_transmitters.csv")
+    operational.add_argument("--uavs", default="examples/sample_uavs.csv")
+    operational.add_argument("--tasks", default="examples/sample_tasks.csv")
 
     train = subparsers.add_parser("train")
     train.add_argument("--records", required=True)
@@ -45,16 +59,57 @@ def main() -> None:
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8010)
 
+    em = subparsers.add_parser("analyze-em")
+    em.add_argument("--cells", required=True)
+    em.add_argument("--transmitters", required=True)
+    em.add_argument("--output", required=True)
+
+    allocation = subparsers.add_parser("allocate-resources")
+    allocation.add_argument("--cells", required=True)
+    allocation.add_argument("--edges", required=True)
+    allocation.add_argument("--uavs", required=True)
+    allocation.add_argument("--tasks", required=True)
+    allocation.add_argument("--output", required=True)
+
+    route = subparsers.add_parser("plan-route")
+    route.add_argument("--cells", required=True)
+    route.add_argument("--edges", required=True)
+    route.add_argument("--start-grid", required=True)
+    route.add_argument("--start-height", type=int, required=True)
+    route.add_argument("--end-grid", required=True)
+    route.add_argument("--end-height", type=int, required=True)
+    route.add_argument("--output", required=True)
+
+    safety = subparsers.add_parser("assess-safety")
+    safety.add_argument("--cells", required=True)
+    safety.add_argument("--uavs", required=True)
+    safety.add_argument("--output", required=True)
+
     args = parser.parse_args()
     if args.command == "generate-sample":
         generate_sample(args.records, args.edges)
         print(f"generated records={args.records} edges={args.edges}")
+    elif args.command == "generate-operational-sample":
+        generate_operational_sample(args.cells, args.edges, args.transmitters, args.uavs, args.tasks)
+        print(
+            "generated "
+            f"cells={args.cells} edges={args.edges} transmitters={args.transmitters} "
+            f"uavs={args.uavs} tasks={args.tasks}"
+        )
     elif args.command == "train":
         _train(args)
     elif args.command == "predict":
         _predict(args)
     elif args.command == "serve":
         run_server(args.artifact, args.host, args.port)
+    elif args.command == "analyze-em":
+        _analyze_em(args)
+    elif args.command == "allocate-resources":
+        _allocate_resources(args)
+    elif args.command == "plan-route":
+        _plan_route(args)
+    elif args.command == "assess-safety":
+        _assess_safety(args)
 
 
 def _train(args: argparse.Namespace) -> None:
@@ -105,6 +160,57 @@ def _predict(args: argparse.Namespace) -> None:
     print(f"wrote predictions to {args.output}")
 
 
+def _analyze_em(args: argparse.Namespace) -> None:
+    cells = read_cells_csv(args.cells)
+    transmitters = read_transmitters_csv(args.transmitters)
+    result = ElectromagneticEnvironmentModel().analyze(cells, transmitters)
+    _write_frame(args.output, result)
+    print(f"wrote electromagnetic analysis to {args.output}")
+
+
+def _allocate_resources(args: argparse.Namespace) -> None:
+    cells = read_cells_csv(args.cells)
+    edges = read_edges_csv(args.edges)
+    uavs = read_uavs_csv(args.uavs)
+    tasks = read_tasks_csv(args.tasks)
+    result = ResourceAllocationModel().allocate(cells, edges, uavs, tasks)
+    _write_frame(args.output, result)
+    print(f"wrote resource allocation to {args.output}")
+
+
+def _plan_route(args: argparse.Namespace) -> None:
+    cells = read_cells_csv(args.cells)
+    edges = read_edges_csv(args.edges)
+    planner = AStarRoutePlanner(cells, edges)
+    result = planner.plan(args.start_grid, args.start_height, args.end_grid, args.end_height)
+    payload = {
+        "found": result.found,
+        "total_cost": result.total_cost,
+        "distance_m": result.distance_m,
+        "risk_cost": result.risk_cost,
+        "message": result.message,
+        "route": route_to_dataframe(result).to_dict(orient="records"),
+    }
+    write_json(args.output, payload)
+    print(f"wrote route plan to {args.output}")
+
+
+def _assess_safety(args: argparse.Namespace) -> None:
+    cells = read_cells_csv(args.cells)
+    uavs = read_uavs_csv(args.uavs)
+    result = SafetyAssessmentModel().assess(cells, uavs)
+    payload = {name: frame.to_dict(orient="records") for name, frame in result.items()}
+    write_json(args.output, payload)
+    print(f"wrote safety assessment to {args.output}")
+
+
+def _write_frame(path: str, frame: pd.DataFrame) -> None:
+    if Path(path).suffix.lower() == ".csv":
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+        frame.to_csv(path, index=False)
+        return
+    write_json(path, frame.to_dict(orient="records"))
+
+
 if __name__ == "__main__":
     main()
-

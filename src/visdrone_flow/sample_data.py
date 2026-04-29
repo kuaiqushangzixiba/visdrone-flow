@@ -88,3 +88,178 @@ def generate_sample(records_path: str | Path, edges_path: str | Path, seed: int 
     pd.DataFrame(rows).to_csv(records_path, index=False)
     pd.DataFrame(edge_rows).to_csv(edges_path, index=False)
 
+
+def generate_operational_sample(
+    cells_path: str | Path,
+    edges_path: str | Path,
+    transmitters_path: str | Path,
+    uavs_path: str | Path,
+    tasks_path: str | Path,
+) -> None:
+    cells = []
+    grid_rows = range(4)
+    grid_cols = range(4)
+    height_layers = range(3)
+    spacing_m = 500.0
+    for r in grid_rows:
+        for c in grid_cols:
+            for h in height_layers:
+                grid_id = f"BDG-L18-R{r:02d}-C{c:02d}"
+                corridor = c in (1, 2)
+                cells.append(
+                    {
+                        "grid_id": grid_id,
+                        "height_layer": h,
+                        "center_x_m": c * spacing_m,
+                        "center_y_m": r * spacing_m,
+                        "center_z_m": 80 + h * 60,
+                        "route_capacity": 8 + (4 if corridor else 0),
+                        "occupancy": 0.15 + 0.05 * h,
+                        "congestion_score": 0.25 + (0.25 if corridor and h == 1 else 0.0),
+                        "em_interference": 0.15 + 0.08 * c,
+                        "weather_wind": 4 + r,
+                        "weather_visibility": 8000 - 300 * r,
+                        "population_density": 2500 + 1200 * r + 600 * c,
+                        "no_fly_flag": 1 if (r == 2 and c == 2 and h == 0) else 0,
+                        "risk_score": 0.08 * r + 0.04 * c,
+                        "height_ref": "AGL",
+                    }
+                )
+
+    edge_rows = []
+    for r in grid_rows:
+        for c in grid_cols:
+            for h in height_layers:
+                source = f"BDG-L18-R{r:02d}-C{c:02d}"
+                for dr, dc, edge_type in [(1, 0, "adjacent"), (0, 1, "route")]:
+                    rr, cc = r + dr, c + dc
+                    if rr in grid_rows and cc in grid_cols:
+                        edge_rows.append(
+                            {
+                                "source_grid_id": source,
+                                "source_height_layer": h,
+                                "target_grid_id": f"BDG-L18-R{rr:02d}-C{cc:02d}",
+                                "target_height_layer": h,
+                                "weight": 1.0,
+                                "edge_type": edge_type,
+                                "directed": False,
+                            }
+                        )
+                if h + 1 in height_layers:
+                    edge_rows.append(
+                        {
+                            "source_grid_id": source,
+                            "source_height_layer": h,
+                            "target_grid_id": source,
+                            "target_height_layer": h + 1,
+                            "weight": 0.8,
+                            "edge_type": "vertical",
+                            "directed": False,
+                        }
+                    )
+
+    transmitters = [
+        {
+            "transmitter_id": "BS-001",
+            "x_m": -200,
+            "y_m": -200,
+            "z_m": 45,
+            "frequency_mhz": 2400,
+            "bandwidth_mhz": 20,
+            "tx_power_dbm": 36,
+            "tx_gain_dbi": 8,
+            "rx_gain_dbi": 2,
+            "noise_figure_db": 7,
+            "role": "base_station",
+        },
+        {
+            "transmitter_id": "RELAY-001",
+            "x_m": 1200,
+            "y_m": 900,
+            "z_m": 160,
+            "frequency_mhz": 2400,
+            "bandwidth_mhz": 20,
+            "tx_power_dbm": 30,
+            "tx_gain_dbi": 5,
+            "rx_gain_dbi": 2,
+            "noise_figure_db": 7,
+            "role": "relay",
+        },
+        {
+            "transmitter_id": "JAM-001",
+            "x_m": 1600,
+            "y_m": 1400,
+            "z_m": 80,
+            "frequency_mhz": 2400,
+            "bandwidth_mhz": 20,
+            "tx_power_dbm": 18,
+            "tx_gain_dbi": 0,
+            "rx_gain_dbi": 0,
+            "noise_figure_db": 7,
+            "role": "jammer",
+        },
+    ]
+    uavs = [
+        {
+            "uav_id": "UAV-001",
+            "grid_id": "BDG-L18-R00-C00",
+            "height_layer": 1,
+            "x_m": 0,
+            "y_m": 0,
+            "z_m": 140,
+            "vx_mps": 8,
+            "vy_mps": 4,
+            "vz_mps": 0,
+            "speed_mps": 14,
+            "battery_pct": 92,
+            "max_range_m": 15000,
+            "payload_capacity_kg": 3.0,
+            "current_payload_kg": 0.4,
+            "priority": 2,
+        },
+        {
+            "uav_id": "UAV-002",
+            "grid_id": "BDG-L18-R03-C00",
+            "height_layer": 1,
+            "x_m": 0,
+            "y_m": 1500,
+            "z_m": 140,
+            "vx_mps": 8,
+            "vy_mps": -5,
+            "vz_mps": 0,
+            "speed_mps": 13,
+            "battery_pct": 78,
+            "max_range_m": 12000,
+            "payload_capacity_kg": 2.0,
+            "current_payload_kg": 0.2,
+            "priority": 1,
+        },
+    ]
+    tasks = [
+        {
+            "task_id": "TASK-001",
+            "origin_grid_id": "BDG-L18-R00-C01",
+            "origin_height_layer": 1,
+            "dest_grid_id": "BDG-L18-R03-C03",
+            "dest_height_layer": 1,
+            "priority": 5,
+            "required_payload_kg": 1.0,
+        },
+        {
+            "task_id": "TASK-002",
+            "origin_grid_id": "BDG-L18-R03-C00",
+            "origin_height_layer": 1,
+            "dest_grid_id": "BDG-L18-R00-C03",
+            "dest_height_layer": 2,
+            "priority": 3,
+            "required_payload_kg": 0.5,
+        },
+    ]
+
+    for path in [cells_path, edges_path, transmitters_path, uavs_path, tasks_path]:
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(cells).to_csv(cells_path, index=False)
+    pd.DataFrame(edge_rows).to_csv(edges_path, index=False)
+    pd.DataFrame(transmitters).to_csv(transmitters_path, index=False)
+    pd.DataFrame(uavs).to_csv(uavs_path, index=False)
+    pd.DataFrame(tasks).to_csv(tasks_path, index=False)
