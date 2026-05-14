@@ -15,14 +15,16 @@ class Args:
 def test_train_and_predict(tmp_path: Path) -> None:
     records = tmp_path / "records.csv"
     edges = tmp_path / "edges.csv"
+    perception = tmp_path / "perception.csv"
     artifact = tmp_path / "model.pkl"
     output = tmp_path / "predictions.json"
-    generate_sample(records, edges)
+    generate_sample(records, edges, perception_path=perception)
 
     _train(
         Args(
             records=str(records),
             edges=str(edges),
+            perception=str(perception),
             artifact=str(artifact),
             model="ridge",
             history_steps=12,
@@ -38,6 +40,7 @@ def test_train_and_predict(tmp_path: Path) -> None:
             artifact=str(artifact),
             records=str(records),
             edges=str(edges),
+            perception=str(perception),
             output=str(output),
             horizon_steps=6,
             time_granularity_minutes=5,
@@ -51,3 +54,39 @@ def test_train_and_predict(tmp_path: Path) -> None:
     assert first["grid_id"]
     assert first["pred_flow"] >= 0
 
+
+def test_online_model_train_and_predict(tmp_path: Path) -> None:
+    records = tmp_path / "records.csv"
+    edges = tmp_path / "edges.csv"
+    perception = tmp_path / "perception.csv"
+    artifact = tmp_path / "online.pkl"
+    output = tmp_path / "online_predictions.json"
+    generate_sample(records, edges, perception_path=perception)
+
+    _train(
+        Args(
+            records=str(records),
+            edges=str(edges),
+            perception=str(perception),
+            artifact=str(artifact),
+            model="online",
+            history_steps=12,
+            horizon_steps=6,
+            target_column="flow_in",
+            alpha=0.0001,
+        )
+    )
+    _predict(
+        Args(
+            artifact=str(artifact),
+            records=str(records),
+            edges=str(edges),
+            perception=str(perception),
+            output=str(output),
+            horizon_steps=6,
+            time_granularity_minutes=5,
+        )
+    )
+    payload = read_json(output)
+    assert payload["model_name"] == "OnlineSpatialTemporalSGD"
+    assert len(payload["predictions"]) > 0
