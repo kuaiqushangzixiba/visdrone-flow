@@ -1,0 +1,153 @@
+graph TD
+    %% ============================================================
+    %% VisDrone 组织架构图 — 10 算法模块 + 数据基础设施
+    %% ============================================================
+
+    %% ── 样式定义 ──
+    classDef dataLayer fill:#0A2A44,color:#FFFFFF,stroke:#1565C0,stroke-width:2px
+    classDef baseAlgo fill:#1565C0,color:#FFFFFF,stroke:#0D3B66,stroke-width:2px
+    classDef newAlgo fill:#00897B,color:#FFFFFF,stroke:#00695C,stroke-width:2px
+    classDef appAlgo fill:#E65100,color:#FFFFFF,stroke:#BF360C,stroke-width:2px
+    classDef bus fill:#F0F4F8,color:#1A2332,stroke:#64748B,stroke-width:2px,stroke-dasharray: 5 5
+    classDef output fill:#2E7D32,color:#FFFFFF,stroke:#1B5E20,stroke-width:1px
+
+    %% ── 数据基础设施层 ──
+    subgraph DATA_LAYER [数据基础设施层]
+        direction LR
+        CELLS[("cells.csv<br/>网格空间数据")]
+        EDGES[("edges.csv<br/>邻接拓扑数据")]
+        RECORDS[("records.csv<br/>流量时序数据")]
+        TX[("transmitters.csv<br/>电磁发射源")]
+        UAVS[("uavs.csv<br/>无人机状态")]
+        TASKS[("tasks.csv<br/>任务需求")]
+        PERCEPTION[("perception.csv<br/>感知融合数据")]
+        DEM[("DEM / DSM<br/>地形高程数据")]
+        GIS[("GIS Layers<br/>障碍物/建筑/道路")]
+        WEATHER[("气象API<br/>实时气象数据")]
+        LIDAR[("LiDAR 点云<br/>实时障碍检测")]
+    end
+    class CELLS,EDGES,RECORDS,TX,UAVS,TASKS,PERCEPTION,DEM,GIS,WEATHER,LIDAR dataLayer
+
+    %% ── 统一数据总线 ──
+    DATA_BUS{{"统一数据总线<br/>cell_key = grid_id + height_layer + time_slot<br/>node_id = grid_id#Hheight_layer"}}
+    class DATA_BUS bus
+
+    DATA_LAYER --> DATA_BUS
+
+    %% ── 基础算法层 (1-8) ──
+    subgraph BASE_LAYER [基础算法层 1-8]
+        direction TB
+
+        ALGO1["<b>① 三维空间流量预测</b><br/>Ridge / SGD / Historical<br/>28维特征工程<br/>→ congestion_score"]
+        ALGO2["<b>② 地形跟随·地形回避</b><br/>级联PID / 前视地形跟随<br/>横向避障解算<br/>→ pitch/roll/throttle cmd"]
+        ALGO3["<b>③ 空间电磁环境分析</b><br/>FSPL + SINR + 链路预算<br/>干扰源分类(高/中/低频)<br/>→ interference_level, heatmap"]
+        ALGO4["<b>④ 三维空间资源分配</b><br/>约束贪心 + A* 子调用<br/>四大约束检查<br/>→ UAV-Task 分配方案"]
+        ALGO5["<b>⑤ 飞行活动监控分析</b><br/>Kalman Filter 状态估计<br/>数字孪生同步<br/>→ 实时告警 + 决策建议"]
+        ALGO6["<b>⑥ 障碍物碰撞风险分析</b><br/>OctoMap 占据栅格<br/>FCL 碰撞检测<br/>→ 红/黄/绿风险区"]
+        ALGO7["<b>⑦ 飞行三维空间覆盖分析</b><br/>视锥建模 + LOS 遮挡<br/>方案对比优化<br/>→ 覆盖率 + 热力图"]
+        ALGO8["<b>⑧ 飞行可视域分析</b><br/>Viewshed 射线追踪<br/>累积可视域<br/>→ 盲区 + 遮挡报告"]
+    end
+    class ALGO1,ALGO3,ALGO4,ALGO5 baseAlgo
+    class ALGO2,ALGO6,ALGO7,ALGO8 newAlgo
+
+    %% ── 应用算法层 (9-10) ──
+    subgraph APP_LAYER [应用算法层 9-10]
+        direction TB
+        ALGO9["<b>⑨ 航线规划与导航分析</b><br/>3D A* f(n)=g(n)+h(n)<br/>多因子加权代价<br/>→ RoutePlan + 合规报告"]
+        ALGO10["<b>⑩ 低空飞行安全评估</b><br/>CPA/TCPA + 网格风险矩阵<br/>ML 风险预测<br/>→ 风险报告 + 标红定位"]
+    end
+    class ALGO9,ALGO10 appAlgo
+
+    %% ── 数据总线到各算法的连接 ──
+    DATA_BUS --> ALGO1
+    DATA_BUS --> ALGO2
+    DATA_BUS --> ALGO3
+    DATA_BUS --> ALGO4
+    DATA_BUS --> ALGO5
+    DATA_BUS --> ALGO6
+    DATA_BUS --> ALGO7
+    DATA_BUS --> ALGO8
+    DATA_BUS --> ALGO9
+    DATA_BUS --> ALGO10
+
+    %% ── 算法间数据依赖 ──
+    %% 1→4: congestion_score → 资源分配
+    ALGO1 -- "congestion_score" --> ALGO4
+    %% 1→9: congestion_score → 航线规划 (权重 120)
+    ALGO1 -- "congestion_score" --> ALGO9
+    %% 1→10: congestion_score → 安全评估
+    ALGO1 -- "congestion_score" --> ALGO10
+
+    %% 2→6: 避障指令验证
+    ALGO2 -- "avoidance_cmd" --> ALGO6
+
+    %% 3→1: em_interference → 流量特征
+    ALGO3 -- "em_interference<br/>(外生特征)" --> ALGO1
+    %% 3→9: em_interference → 航线 (权重 60)
+    ALGO3 -- "em_interference" --> ALGO9
+    %% 3→10: em_interference → 安全评估
+    ALGO3 -- "em_interference" --> ALGO10
+
+    %% 4→5: FlightPlan → 监控基准
+    ALGO4 -- "FlightPlan<br/>(监控基准)" --> ALGO5
+
+    %% 5→10: 实时UAV状态
+    ALGO5 -- "realtime_uav_state" --> ALGO10
+
+    %% 6→10: collision_risk
+    ALGO6 -- "collision_risk" --> ALGO10
+
+    %% 7→9: 覆盖反馈 → 航线优化
+    ALGO7 -- "coverage_feedback<br/>(最优航点)" --> ALGO9
+
+    %% 8→9: 盲区信息 → 航线
+    ALGO8 -- "occlusion_report" --> ALGO9
+
+    %% 9→4: A* 子调用
+    ALGO9 -- "A* path<br/>(子调用)" --> ALGO4
+    %% 9→6: planned_trajectory
+    ALGO9 -- "planned_trajectory" --> ALGO6
+    %% 9→7: waypoints → 覆盖
+    ALGO9 -- "waypoints" --> ALGO7
+    %% 9→8: waypoints → 可视域
+    ALGO9 -- "waypoints" --> ALGO8
+    %% 9→10: 计划路径的 risk
+    ALGO9 -- "route_risk_cost" --> ALGO10
+
+    %% ── 最终输出 ──
+    subgraph OUTPUTS [最终输出]
+        direction LR
+        O1["流量预测 JSON<br/>PredictionResponse"]
+        O2["飞控指令 JSON<br/>FlightAttitudeCmd"]
+        O3["电磁热力图<br/>EM Heatmap"]
+        O4["飞行计划表<br/>Flight Plan"]
+        O5["监控告警<br/>Monitoring Alert"]
+        O6["风险区地图<br/>Risk Zone Map"]
+        O7["覆盖方案<br/>Optimal Scheme"]
+        O8["盲区报告<br/>Occlusion Report"]
+        O9["航线规划<br/>Route Plan"]
+        O10["安全评估报告<br/>Risk Report"]
+    end
+    class O1,O2,O3,O4,O5,O6,O7,O8,O9,O10 output
+
+    ALGO1 --> O1
+    ALGO2 --> O2
+    ALGO3 --> O3
+    ALGO4 --> O4
+    ALGO5 --> O5
+    ALGO6 --> O6
+    ALGO7 --> O7
+    ALGO8 --> O8
+    ALGO9 --> O9
+    ALGO10 --> O10
+
+    %% ── 图例 ──
+    subgraph LEGEND [图例]
+        LEG1["⚫ 数据层: CSV/API/传感器"]
+        LEG2["🔵 基础算法 (已有基线)"]
+        LEG3["🟢 基础算法 (全新规划)"]
+        LEG4["🟠 应用算法 (9-10)"]
+        LEG5["⬜ 数据总线"]
+        LEG6["🟢 最终输出"]
+    end
+    class LEG1,LEG2,LEG3,LEG4,LEG5,LEG6 dataLayer
