@@ -6,6 +6,7 @@
 
 - 标准数据结构：`grid_id + height_layer + time_slot`
 - 训练模型：`SpatialTemporalRidge`
+- 在线学习模型：`OnlineSpatialTemporalSGD`
 - 兜底模型：`HistoricalAverage`
 - 空间电磁环境分析：FSPL / SINR / 干扰热力图基线
 - 三维空间资源分配：约束贪心任务分配基线
@@ -71,3 +72,12 @@ C:\ProgramData\anaconda3\python.exe run.py assess-safety --cells examples/sample
 ```
 
 具体方法见 [docs/operational_models.md](docs/operational_models.md)。
+
+## 当前紧急优先模型
+
+当前阶段优先推进：
+
+- 三维空间流量预测模型
+- 三维空间资源分配模型
+
+实施说明见 [docs/urgent_models.md](docs/urgent_models.md)。

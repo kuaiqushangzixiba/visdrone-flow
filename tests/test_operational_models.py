@@ -46,6 +46,8 @@ def test_route_allocation_and_safety(tmp_path: Path) -> None:
     allocation = ResourceAllocationModel().allocate(cells, edges, uavs, tasks)
     assert set(allocation["status"]) == {"assigned"}
     assert allocation["uav_id"].notna().all()
+    assert allocation["flight_plan"].map(len).gt(0).all()
+    assert {"capacity_penalty", "balance_penalty", "task_execution_advice"} <= set(allocation.columns)
 
     safety = SafetyAssessmentModel().assess(cells, uavs)
     assert {"summary", "conflicts", "grid_risks"} <= set(safety)

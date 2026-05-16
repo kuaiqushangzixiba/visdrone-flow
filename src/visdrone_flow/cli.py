@@ -10,13 +10,14 @@ from .allocation import ResourceAllocationModel
 from .api import run_server
 from .electromagnetic import ElectromagneticEnvironmentModel
 from .features import FeatureConfig
-from .io import read_edges_csv, read_records_csv, write_json
+from .io import read_edges_csv, read_optional_csv, read_records_csv, write_json
 from .model_store import ModelBundle, load_bundle, save_bundle, utc_now_iso
-from .models import HistoricalAverageModel, SpatialTemporalRidgeModel
+from .models import HistoricalAverageModel, OnlineSpatialTemporalSGDModel, SpatialTemporalRidgeModel
+from .perception import build_standard_flow_dataset
 from .routing import AStarRoutePlanner, route_to_dataframe
 from .safety import SafetyAssessmentModel
 from .sample_data import generate_operational_sample, generate_sample
-from .schemas import PredictionRequest
+from .schemas import FlowRecord, PredictionRequest
 from .service import FlowForecastService
 from .state_io import read_cells_csv, read_tasks_csv, read_transmitters_csv, read_uavs_csv
 
@@ -28,6 +29,7 @@ def main() -> None:
     sample = subparsers.add_parser("generate-sample")
     sample.add_argument("--records", default="examples/sample_flow.csv")
     sample.add_argument("--edges", default="examples/sample_edges.csv")
+    sample.add_argument("--perception", default="examples/sample_perception.csv")
 
     operational = subparsers.add_parser("generate-operational-sample")
     operational.add_argument("--cells", default="examples/sample_cells.csv")
@@ -39,8 +41,9 @@ def main() -> None:
     train = subparsers.add_parser("train")
     train.add_argument("--records", required=True)
     train.add_argument("--edges", default=None)
+    train.add_argument("--perception", default=None)
     train.add_argument("--artifact", required=True)
-    train.add_argument("--model", choices=["ridge", "historical"], default="ridge")
+    train.add_argument("--model", choices=["ridge", "historical", "online"], default="ridge")
     train.add_argument("--history-steps", type=int, default=12)
     train.add_argument("--horizon-steps", type=int, default=6)
     train.add_argument("--target-column", default="flow_in")
@@ -50,6 +53,7 @@ def main() -> None:
     predict.add_argument("--artifact", required=True)
     predict.add_argument("--records", required=True)
     predict.add_argument("--edges", default=None)
+    predict.add_argument("--perception", default=None)
     predict.add_argument("--output", required=True)
     predict.add_argument("--horizon-steps", type=int, default=6)
     predict.add_argument("--time-granularity-minutes", type=int, default=5)
@@ -70,6 +74,8 @@ def main() -> None:
     allocation.add_argument("--uavs", required=True)
     allocation.add_argument("--tasks", required=True)
     allocation.add_argument("--output", required=True)
+    allocation.add_argument("--time-granularity-minutes", type=int, default=5)
+    allocation.add_argument("--safety-buffer-slots", type=int, default=1)
 
     route = subparsers.add_parser("plan-route")
     route.add_argument("--cells", required=True)
@@ -87,8 +93,8 @@ def main() -> None:
 
     args = parser.parse_args()
     if args.command == "generate-sample":
-        generate_sample(args.records, args.edges)
-        print(f"generated records={args.records} edges={args.edges}")
+        generate_sample(args.records, args.edges, perception_path=args.perception)
+        print(f"generated records={args.records} edges={args.edges} perception={args.perception}")
     elif args.command == "generate-operational-sample":
         generate_operational_sample(args.cells, args.edges, args.transmitters, args.uavs, args.tasks)
         print(
@@ -114,6 +120,8 @@ def main() -> None:
 
 def _train(args: argparse.Namespace) -> None:
     records = read_records_csv(args.records)
+    perception = read_optional_csv(args.perception)
+    records = build_standard_flow_dataset(records, perception)
     edges = read_edges_csv(args.edges)
     config = FeatureConfig(
         target_column=args.target_column,
@@ -123,6 +131,9 @@ def _train(args: argparse.Namespace) -> None:
     if args.model == "historical":
         model = HistoricalAverageModel.fit(records, config)
         name = "HistoricalAverage"
+    elif args.model == "online":
+        model = OnlineSpatialTemporalSGDModel.fit(records, edges, config, alpha=args.alpha)
+        name = "OnlineSpatialTemporalSGD"
     else:
         model = SpatialTemporalRidgeModel.fit(records, edges, config, alpha=args.alpha)
         name = "SpatialTemporalRidge"
@@ -133,6 +144,7 @@ def _train(args: argparse.Namespace) -> None:
         metadata={
             "records": str(Path(args.records)),
             "edges": str(Path(args.edges)) if args.edges else None,
+            "perception": str(Path(args.perception)) if args.perception else None,
             "history_steps": args.history_steps,
             "horizon_steps": args.horizon_steps,
             "target_column": args.target_column,
@@ -144,13 +156,20 @@ def _train(args: argparse.Namespace) -> None:
 
 def _predict(args: argparse.Namespace) -> None:
     records = read_records_csv(args.records)
+    perception = read_optional_csv(args.perception)
+    records = build_standard_flow_dataset(records, perception)
     edges = read_edges_csv(args.edges)
     request = PredictionRequest.model_validate(
         {
             "request_id": "cli",
             "horizon_steps": args.horizon_steps,
             "time_granularity_minutes": args.time_granularity_minutes,
-            "records": json.loads(records.to_json(orient="records", date_format="iso")),
+            "records": json.loads(
+                records[[column for column in FlowRecord.model_fields if column in records.columns]].to_json(
+                    orient="records",
+                    date_format="iso",
+                )
+            ),
             "edges": json.loads(edges.to_json(orient="records")) if not edges.empty else [],
         }
     )
@@ -173,7 +192,14 @@ def _allocate_resources(args: argparse.Namespace) -> None:
     edges = read_edges_csv(args.edges)
     uavs = read_uavs_csv(args.uavs)
     tasks = read_tasks_csv(args.tasks)
-    result = ResourceAllocationModel().allocate(cells, edges, uavs, tasks)
+    from .allocation import ReservationPolicy
+
+    result = ResourceAllocationModel(
+        policy=ReservationPolicy(
+            time_granularity_minutes=args.time_granularity_minutes,
+            safety_buffer_slots=args.safety_buffer_slots,
+        )
+    ).allocate(cells, edges, uavs, tasks)
     _write_frame(args.output, result)
     print(f"wrote resource allocation to {args.output}")
 

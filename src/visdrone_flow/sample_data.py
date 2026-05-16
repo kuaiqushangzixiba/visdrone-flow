@@ -6,9 +6,15 @@ import numpy as np
 import pandas as pd
 
 
-def generate_sample(records_path: str | Path, edges_path: str | Path, seed: int = 42) -> None:
+def generate_sample(
+    records_path: str | Path,
+    edges_path: str | Path,
+    seed: int = 42,
+    perception_path: str | Path | None = None,
+) -> None:
     rng = np.random.default_rng(seed)
     rows = []
+    perception_rows = []
     start = pd.Timestamp("2026-04-29T08:00:00")
     grid_rows = range(4)
     grid_cols = range(4)
@@ -50,6 +56,19 @@ def generate_sample(records_path: str | Path, edges_path: str | Path, seed: int 
                             "height_ref": "AGL",
                         }
                     )
+                    if step % 3 == 0:
+                        perception_rows.append(
+                            {
+                                "grid_id": grid_id,
+                                "height_layer": h,
+                                "time_slot": timestamp.isoformat(),
+                                "detected_uav_count": round(max(0.0, task_count + rng.normal(0, 0.6)), 4),
+                                "sensor_confidence": round(float(np.clip(0.85 + rng.normal(0, 0.05), 0.5, 1.0)), 4),
+                                "simulated_density": round(min(1.5, flow / capacity + rng.normal(0, 0.03)), 4),
+                                "simulated_avg_speed": round(max(2.0, 14.0 - 0.14 * flow + rng.normal(0, 0.5)), 4),
+                                "simulated_em_interference": round(max(0.0, 0.18 + 0.05 * c + rng.normal(0, 0.04)), 4),
+                            }
+                        )
 
     edge_rows = []
     for r in grid_rows:
@@ -87,6 +106,9 @@ def generate_sample(records_path: str | Path, edges_path: str | Path, seed: int 
     Path(edges_path).parent.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(rows).to_csv(records_path, index=False)
     pd.DataFrame(edge_rows).to_csv(edges_path, index=False)
+    if perception_path:
+        Path(perception_path).parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(perception_rows).to_csv(perception_path, index=False)
 
 
 def generate_operational_sample(
@@ -244,6 +266,8 @@ def generate_operational_sample(
             "dest_height_layer": 1,
             "priority": 5,
             "required_payload_kg": 1.0,
+            "earliest_time": "2026-05-14T08:00:00",
+            "latest_time": "2026-05-14T08:30:00",
         },
         {
             "task_id": "TASK-002",
@@ -253,6 +277,8 @@ def generate_operational_sample(
             "dest_height_layer": 2,
             "priority": 3,
             "required_payload_kg": 0.5,
+            "earliest_time": "2026-05-14T08:05:00",
+            "latest_time": "2026-05-14T08:45:00",
         },
     ]
 

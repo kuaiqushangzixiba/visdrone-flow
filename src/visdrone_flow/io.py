@@ -55,6 +55,12 @@ def read_edges_csv(path: str | Path | None) -> pd.DataFrame:
     return frame
 
 
+def read_optional_csv(path: str | Path | None) -> pd.DataFrame | None:
+    if not path:
+        return None
+    return pd.read_csv(path)
+
+
 def records_from_models(records: list[FlowRecord]) -> pd.DataFrame:
     return pd.DataFrame([record.model_dump(mode="json") for record in records]).assign(
         time_slot=lambda df: pd.to_datetime(df["time_slot"], utc=False)
@@ -75,4 +81,3 @@ def write_json(path: str | Path, payload: Any) -> None:
 def read_json(path: str | Path) -> Any:
     with Path(path).open("r", encoding="utf-8") as file:
         return json.load(file)
-
